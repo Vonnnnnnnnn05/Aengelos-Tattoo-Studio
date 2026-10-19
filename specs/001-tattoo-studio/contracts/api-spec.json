@@ -1,0 +1,234 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Aengelos Tattoo Studio Controller API",
+    "description": "Unified RESTful API routing for Client, Artist, and Admin actions within Aengelos Tattoo Studio Management System.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost/tattoo/public",
+      "description": "Local XAMPP Development Server"
+    }
+  ],
+  "paths": {
+    "/api.php": {
+      "get": {
+        "summary": "Retrieve data modules based on query action",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "get_session",
+                "get_client_dashboard",
+                "get_pricing_matrix",
+                "get_artist_schedule",
+                "get_appointment_details",
+                "get_inventory_dashboard",
+                "get_audit_stats"
+              ]
+            }
+          },
+          {
+            "name": "appointment_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful standard JSON response envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access"
+          },
+          "403": {
+            "description": "Forbidden role access"
+          }
+        }
+      },
+      "post": {
+        "summary": "Execute state mutations, uploads, and transactional actions",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "login",
+                "register",
+                "logout",
+                "save_mockup",
+                "create_appointment",
+                "upload_receipt",
+                "submit_waiver",
+                "verify_deposit",
+                "log_session",
+                "add_inventory_batch",
+                "update_pricing"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "artwork_file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "receipt_file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "signature_data": {
+                    "type": "string",
+                    "description": "Base64 dataURL PNG signature"
+                  },
+                  "composite_data": {
+                    "type": "string",
+                    "description": "Base64 dataURL PNG composite from Fabric.js"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or missing required fields"
+          },
+          "422": {
+            "description": "Unprocessable entity (e.g. insufficient inventory, double booking)"
+          }
+        }
+      }
+    },
+    "/export.php": {
+      "get": {
+        "summary": "Stream downloadable CSV or PDF reports for audit and accounting",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "appointments",
+                "sessions",
+                "payments",
+                "inventory",
+                "waivers"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["csv", "pdf"]
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary or text streaming download",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponse": {
+        "type": "object",
+        "required": ["success", "message"],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "nullable": true
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

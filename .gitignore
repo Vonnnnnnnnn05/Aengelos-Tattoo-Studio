@@ -1,0 +1,18 @@
+# Aengelos Tattoo Studio .gitignore
+# Environment & IDE
+.env*
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+*.log
+
+# Uploads directory (keep directory structure, ignore user-uploaded binaries)
+uploads/artworks/*
+!uploads/artworks/.gitkeep
+uploads/mockups/*
+!uploads/mockups/.gitkeep
+uploads/receipts/*
+!uploads/receipts/.gitkeep
+uploads/waivers_pdf/*
+!uploads/waivers_pdf/.gitkeep
