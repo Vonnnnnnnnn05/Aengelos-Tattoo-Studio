@@ -10,7 +10,7 @@ $totalAppts = (int)$pdo->query("SELECT COUNT(*) FROM appointments")->fetchColumn
 $totalSessions = (int)$pdo->query("SELECT COUNT(*) FROM session_logs")->fetchColumn();
 $totalDeposits = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE deposit_status = 'verified'")->fetchColumn();
 $totalBatches = (int)$pdo->query("SELECT COUNT(*) FROM supply_batches_fifo")->fetchColumn();
-$totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE pdf_archive_path IS NOT NULL AND pdf_archive_path != ''")->fetchColumn();
+$totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM digital_waivers WHERE pdf_archive_path IS NOT NULL AND pdf_archive_path != ''")->fetchColumn();
 ?>
 <!DOCTYPE html>
 <html lang="en">
