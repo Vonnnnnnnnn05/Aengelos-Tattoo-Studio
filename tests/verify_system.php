@@ -14,13 +14,13 @@ if ($pdo) {
     exit(1);
 }
 
-// 2. Tables Verification
+// 2. Tables Verification (Inventory removed, Tattoo Catalog active)
 echo "[2] Schema Tables: ";
 $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
-$expected = ['users', 'service_pricing_matrix', 'visualizer_mockups', 'appointments', 'digital_waivers', 'session_logs', 'sterile_supplies', 'supply_batches_fifo', 'supply_consumption_logs'];
+$expected = ['users', 'service_pricing_matrix', 'tattoo_catalog', 'visualizer_mockups', 'appointments', 'digital_waivers', 'session_logs'];
 $missing = array_diff($expected, $tables);
 if (empty($missing)) {
-    echo "PASS (All " . count($expected) . " tables present)\n";
+    echo "PASS (All " . count($expected) . " core tables present)\n";
 } else {
     echo "FAIL (Missing: " . implode(', ', $missing) . ")\n";
     exit(1);
@@ -28,11 +28,10 @@ if (empty($missing)) {
 
 // 3. User Credentials & Roles Verification
 echo "[3] Seed Accounts: ";
-// Ensure password_hash matches 'password123'
 $newHash = password_hash('password123', PASSWORD_BCRYPT);
 $pdo->prepare("UPDATE users SET password_hash = ? WHERE email IN ('admin@aengelos.com', 'artist@aengelos.com', 'client@aengelos.com')")->execute([$newHash]);
 
-$users = $pdo->query("SELECT role, email, password_hash FROM users")->fetchAll();
+$users = $pdo->query("SELECT role, email, password_hash FROM users WHERE email IN ('admin@aengelos.com', 'artist@aengelos.com', 'client@aengelos.com')")->fetchAll();
 $allValid = true;
 foreach ($users as $u) {
     if (!password_verify('password123', $u['password_hash'])) {
@@ -46,38 +45,14 @@ if ($allValid && count($users) >= 3) {
     echo "FAIL\n";
 }
 
-// 4. FIFO Inventory Allocation Engine Test
-echo "[4] FIFO Inventory Simulation: ";
-$pdo->beginTransaction();
-try {
-    $supplyId = 1; // Needle Cartridge
-    $qtyNeeded = 3;
-
-    $stmtBatches = $pdo->prepare("
-        SELECT id, qty_remaining, expiration_date 
-        FROM supply_batches_fifo 
-        WHERE supply_id = ? AND batch_status = 'active' AND qty_remaining > 0 AND expiration_date > CURDATE()
-        ORDER BY expiration_date ASC, received_date ASC, id ASC
-        FOR UPDATE
-    ");
-    $stmtBatches->execute([$supplyId]);
-    $batches = $stmtBatches->fetchAll();
-
-    $allocated = [];
-    foreach ($batches as $b) {
-        if ($qtyNeeded <= 0) break;
-        $take = min($b['qty_remaining'], $qtyNeeded);
-        $allocated[] = ['batch_id' => $b['id'], 'deducted' => $take];
-        $qtyNeeded -= $take;
-    }
-
-    if ($qtyNeeded === 0 && count($allocated) > 0) {
-        echo "PASS (Allocated 3 units from Batch #" . $allocated[0]['batch_id'] . ")\n";
-    } else {
-        echo "FAIL (Could not satisfy FIFO quantity)\n";
-    }
-} finally {
-    $pdo->rollBack();
+// 4. Shopee-Style Tattoo Catalog Verification
+echo "[4] Tattoo Catalog & E-Commerce Storefront: ";
+$catalogCount = (int)$pdo->query("SELECT COUNT(*) FROM tattoo_catalog WHERE status = 'available'")->fetchColumn();
+if ($catalogCount > 0) {
+    $firstItem = $pdo->query("SELECT title, price, deposit_required FROM tattoo_catalog LIMIT 1")->fetch();
+    echo "PASS ($catalogCount active designs available, e.g. '{$firstItem['title']}' at PHP {$firstItem['price']})\n";
+} else {
+    echo "FAIL (No catalog items found)\n";
 }
 
 // 5. FPDF Generation & Checksum Test

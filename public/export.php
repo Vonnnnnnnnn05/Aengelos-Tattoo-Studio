@@ -10,15 +10,19 @@ $dateStamp = date('Ymd_His');
 // 1. DATA EXTRACTION PER CATEGORY
 switch ($type) {
     case 'appointments':
-        $headers = ['Ref #', 'Client Name', 'Artist', 'Service', 'Body Region', 'Date', 'Time', 'Deposit (PHP)', 'Payment Ref', 'Deposit Status', 'Booking Status'];
+        $headers = ['Ref #', 'Client Name', 'Artist', 'Availed Design / Service', 'Body Placement', 'Placement Notes', 'Date', 'Time', 'Deposit (PHP)', 'Payment Ref', 'Deposit Status', 'Booking Status'];
         $query = "
-            SELECT a.id, u.full_name AS client_name, art.full_name AS artist_name, s.service_name, 
-                   m.body_region, a.appointment_date, a.appointment_time, a.deposit_amount, 
+            SELECT a.id, u.full_name AS client_name, art.full_name AS artist_name, 
+                   COALESCE(cat.title, s.service_name, 'Tattoo Design') AS service_name, 
+                   COALESCE(a.body_region, m.body_region, 'Forearm') AS body_region, 
+                   COALESCE(a.placement_notes, '') AS placement_notes,
+                   a.appointment_date, a.appointment_time, a.deposit_amount, 
                    a.payment_reference, a.deposit_status, a.booking_status 
             FROM appointments a 
             JOIN users u ON a.client_id = u.id 
             JOIN users art ON a.artist_id = art.id
-            JOIN service_pricing_matrix s ON a.service_id = s.id 
+            LEFT JOIN service_pricing_matrix s ON a.service_id = s.id 
+            LEFT JOIN tattoo_catalog cat ON a.catalog_id = cat.id
             LEFT JOIN visualizer_mockups m ON a.mockup_id = m.id 
             ORDER BY a.id DESC
         ";
@@ -39,16 +43,16 @@ switch ($type) {
         $reportTitle = "COMPLETED TATTOO SESSIONS & CHAIR TIME REPORT";
         break;
 
-    case 'inventory_fifo':
-        $headers = ['Batch ID', 'Supply Item', 'Category', 'Batch No', 'Lot No', 'Qty Recv', 'Qty Rem', 'Expiry Date', 'Status'];
+    case 'catalog':
+        $headers = ['Design ID', 'Title', 'Category', 'Uploader', 'Price (PHP)', 'Deposit (PHP)', 'Est Duration (Mins)', 'Status', 'Created At'];
         $query = "
-            SELECT b.id, i.supply_name, i.category, b.batch_number, b.lot_number, 
-                   b.qty_received, b.qty_remaining, b.expiration_date, b.batch_status 
-            FROM supply_batches_fifo b 
-            JOIN sterile_supplies i ON b.supply_id = i.id 
-            ORDER BY b.expiration_date ASC, b.id ASC
+            SELECT c.id, c.title, c.category, u.full_name AS uploader, 
+                   c.price, c.deposit_required, c.est_duration_mins, c.status, c.created_at 
+            FROM tattoo_catalog c 
+            JOIN users u ON c.uploader_id = u.id 
+            ORDER BY c.id DESC
         ";
-        $reportTitle = "STERILE SUPPLY FIFO INVENTORY & BATCH LOT REPORT";
+        $reportTitle = "TATTOO FLASH & SHOPEE STOREFRONT CATALOG REPORT";
         break;
 
     case 'waivers':

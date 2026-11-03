@@ -9,7 +9,7 @@ $currentPage = 'reports';
 $totalAppts = (int)$pdo->query("SELECT COUNT(*) FROM appointments")->fetchColumn();
 $totalSessions = (int)$pdo->query("SELECT COUNT(*) FROM session_logs")->fetchColumn();
 $totalDeposits = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE deposit_status = 'verified'")->fetchColumn();
-$totalBatches = (int)$pdo->query("SELECT COUNT(*) FROM supply_batches_fifo")->fetchColumn();
+$totalCatalog = (int)$pdo->query("SELECT COUNT(*) FROM tattoo_catalog")->fetchColumn();
 $totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM digital_waivers WHERE pdf_archive_path IS NOT NULL AND pdf_archive_path != ''")->fetchColumn();
 ?>
 <!DOCTYPE html>
@@ -44,7 +44,7 @@ $totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM digital_waivers WHERE pdf
             <!-- PAGE TITLE -->
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">Studio Audit & Compliance Reports</h1>
+                    <h1 class="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">Studio Audit & Compliance Reports</h1>
                     <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1">One-click immutable PDF & raw CSV generation across all 5 operational categories.</p>
                 </div>
                 <div>
@@ -72,7 +72,7 @@ $totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM digital_waivers WHERE pdf
                             <span class="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">Category 01</span>
                             <span class="text-xs text-slate-400 dark:text-zinc-500 font-medium"><?= $totalAppts ?> Records</span>
                         </div>
-                        <h3 class="text-base font-bold text-slate-900 dark:text-white">Appointments Schedule</h3>
+                        <h3 class="text-base font-bold text-slate-900 dark:text-white">Appointments & Reservations</h3>
                         <p class="text-xs text-slate-500 dark:text-zinc-400">Complete historical and pending booking requests, client details, placement areas, and booking statuses.</p>
                     </div>
                     <div class="pt-3 border-t border-slate-100 dark:border-zinc-800/80 flex items-center space-x-2">
@@ -113,19 +113,19 @@ $totalWaivers = (int)$pdo->query("SELECT COUNT(*) FROM digital_waivers WHERE pdf
                     </div>
                 </div>
 
-                <!-- 4. FIFO INVENTORY -->
+                <!-- 4. TATTOO FLASH CATALOG (REPLACES REMOVED INVENTORY) -->
                 <div class="bg-white dark:bg-zinc-900/70 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between space-y-4 transition-colors">
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
                             <span class="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md">Category 04</span>
-                            <span class="text-xs text-slate-400 dark:text-zinc-500 font-medium"><?= $totalBatches ?> Lots</span>
+                            <span class="text-xs text-slate-400 dark:text-zinc-500 font-medium"><?= $totalCatalog ?> Designs</span>
                         </div>
-                        <h3 class="text-base font-bold text-slate-900 dark:text-white">FIFO Inventory Registry</h3>
-                        <p class="text-xs text-slate-500 dark:text-zinc-400">Sterile needles, inks, and barriers tracking with batch numbers, lot IDs, expiration dates, and remaining stock.</p>
+                        <h3 class="text-base font-bold text-slate-900 dark:text-white">Shopee Storefront Catalog</h3>
+                        <p class="text-xs text-slate-500 dark:text-zinc-400">Tattoo flash masterworks, full inking prices, down payment matrix, uploader artist, and live storefront availability.</p>
                     </div>
                     <div class="pt-3 border-t border-slate-100 dark:border-zinc-800/80 flex items-center space-x-2">
-                        <a href="export.php?type=inventory_fifo&format=csv" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 font-semibold text-center transition-colors">Export CSV</a>
-                        <a href="export.php?type=inventory_fifo&format=pdf" target="_blank" class="flex-1 py-2 bg-amber-500 hover:bg-amber-600 dark:hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-sm text-center transition-colors">Generate PDF</a>
+                        <a href="export.php?type=catalog&format=csv" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs rounded-xl border border-slate-300 dark:border-zinc-700 font-semibold text-center transition-colors">Export CSV</a>
+                        <a href="export.php?type=catalog&format=pdf" target="_blank" class="flex-1 py-2 bg-amber-500 hover:bg-amber-600 dark:hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-sm text-center transition-colors">Generate PDF</a>
                     </div>
                 </div>
 

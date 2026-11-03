@@ -1,22 +1,27 @@
 -- ============================================================================
--- Aengelos Tattoo Studio Management System - MySQL 8.0 Database Schema
+-- Aengelos Tattoo Studio Management System - MySQL Database Schema
 -- Character Set: utf8mb4, Collation: utf8mb4_unicode_ci
+-- Shopee-Style E-Commerce Flash Catalog & Studio Booking Management
 -- ============================================================================
 
 CREATE DATABASE IF NOT EXISTS aengelos_studio CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE aengelos_studio;
 
--- 1. Users & Client Profiles Directory (RBAC)
+-- Drop obsolete inventory tables if present
 DROP TABLE IF EXISTS supply_consumption_logs;
 DROP TABLE IF EXISTS supply_batches_fifo;
 DROP TABLE IF EXISTS sterile_supplies;
+
+-- Drop operational tables in reverse dependency order
 DROP TABLE IF EXISTS session_logs;
 DROP TABLE IF EXISTS digital_waivers;
 DROP TABLE IF EXISTS appointments;
 DROP TABLE IF EXISTS visualizer_mockups;
+DROP TABLE IF EXISTS tattoo_catalog;
 DROP TABLE IF EXISTS service_pricing_matrix;
 DROP TABLE IF EXISTS users;
 
+-- 1. Users & Client Profiles Directory (RBAC)
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     role ENUM('client', 'artist', 'admin') NOT NULL DEFAULT 'client',
@@ -27,7 +32,7 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. Service Pricing Matrix (Custom, Flash Art, Cover-Up)
+-- 2. Service Pricing Matrix (Baseline Studio Service Tiers)
 CREATE TABLE service_pricing_matrix (
     id INT AUTO_INCREMENT PRIMARY KEY,
     service_name VARCHAR(80) NOT NULL,
@@ -37,7 +42,25 @@ CREATE TABLE service_pricing_matrix (
     est_duration_mins INT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3. 2D Canvas Visualizer Mockups
+-- 3. Shopee-Style Tattoo Design & Flash Art Catalog
+CREATE TABLE tattoo_catalog (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    uploader_id INT NOT NULL,
+    title VARCHAR(150) NOT NULL,
+    category VARCHAR(80) NOT NULL,
+    description TEXT,
+    price DECIMAL(10,2) NOT NULL,
+    deposit_required DECIMAL(10,2) NOT NULL,
+    est_duration_mins INT NOT NULL DEFAULT 120,
+    image_path VARCHAR(255) NOT NULL,
+    tags VARCHAR(255) DEFAULT '',
+    is_featured TINYINT(1) DEFAULT 0,
+    status ENUM('available', 'reserved', 'sold_out', 'archived') DEFAULT 'available',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. 2D Canvas Visualizer Mockups
 CREATE TABLE visualizer_mockups (
     id INT AUTO_INCREMENT PRIMARY KEY,
     client_id INT NOT NULL,
@@ -49,13 +72,16 @@ CREATE TABLE visualizer_mockups (
     FOREIGN KEY (client_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. Online Appointments & Manual Deposit Verification
+-- 5. Online Appointments & Availments (Deposit Verification)
 CREATE TABLE appointments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     client_id INT NOT NULL,
     artist_id INT NOT NULL,
-    service_id INT NOT NULL,
+    service_id INT NULL,
+    catalog_id INT NULL,
     mockup_id INT NULL,
+    body_region VARCHAR(80) NOT NULL DEFAULT 'Forearm',
+    placement_notes VARCHAR(255) NULL,
     appointment_date DATE NOT NULL,
     appointment_time TIME NOT NULL,
     deposit_amount DECIMAL(10,2) NOT NULL,
@@ -66,11 +92,12 @@ CREATE TABLE appointments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (client_id) REFERENCES users(id),
     FOREIGN KEY (artist_id) REFERENCES users(id),
-    FOREIGN KEY (service_id) REFERENCES service_pricing_matrix(id),
-    FOREIGN KEY (mockup_id) REFERENCES visualizer_mockups(id)
+    FOREIGN KEY (service_id) REFERENCES service_pricing_matrix(id) ON DELETE SET NULL,
+    FOREIGN KEY (catalog_id) REFERENCES tattoo_catalog(id) ON DELETE SET NULL,
+    FOREIGN KEY (mockup_id) REFERENCES visualizer_mockups(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5. Digital Consent Waiver Archive
+-- 6. Digital Consent Waiver Archive
 CREATE TABLE digital_waivers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     appointment_id INT NOT NULL UNIQUE,
@@ -86,7 +113,7 @@ CREATE TABLE digital_waivers (
     FOREIGN KEY (client_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 6. Artist Session Execution Logs
+-- 7. Artist Session Execution Logs
 CREATE TABLE session_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     appointment_id INT NOT NULL UNIQUE,
@@ -97,44 +124,4 @@ CREATE TABLE session_logs (
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (appointment_id) REFERENCES appointments(id),
     FOREIGN KEY (artist_id) REFERENCES users(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 7. Sterile Supply Inventory Master
-CREATE TABLE sterile_supplies (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    supply_name VARCHAR(120) NOT NULL,
-    category ENUM('Needle Cartridge', 'Certified Pigment', 'Protective Barrier') NOT NULL,
-    unit VARCHAR(30) NOT NULL DEFAULT 'pcs',
-    reorder_threshold INT NOT NULL DEFAULT 15,
-    total_stock INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 8. Batch / Lot Registry & Expiration Records (FIFO)
-CREATE TABLE supply_batches_fifo (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    supply_id INT NOT NULL,
-    batch_number VARCHAR(80) NOT NULL,
-    lot_number VARCHAR(80) NOT NULL,
-    qty_received INT NOT NULL,
-    qty_remaining INT NOT NULL,
-    received_date DATE NOT NULL,
-    expiration_date DATE NOT NULL,
-    batch_status ENUM('active', 'depleted', 'expired') DEFAULT 'active',
-    FOREIGN KEY (supply_id) REFERENCES sterile_supplies(id) ON DELETE CASCADE,
-    INDEX idx_fifo_lookup (supply_id, batch_status, expiration_date, received_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 9. Sterile Supply Consumption Audit Logs
-CREATE TABLE supply_consumption_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    session_id INT NOT NULL,
-    supply_id INT NOT NULL,
-    batch_id INT NOT NULL,
-    qty_used INT NOT NULL,
-    deducted_by INT NOT NULL,
-    deducted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES session_logs(id),
-    FOREIGN KEY (supply_id) REFERENCES sterile_supplies(id),
-    FOREIGN KEY (batch_id) REFERENCES supply_batches_fifo(id),
-    FOREIGN KEY (deducted_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

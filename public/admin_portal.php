@@ -8,25 +8,29 @@ $currentPage = 'overview';
 // 1. Summary Counts & KPIs
 $totalBookings = (int)$pdo->query("SELECT COUNT(*) FROM appointments")->fetchColumn();
 $verifiedDeposits = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE deposit_status = 'verified'")->fetchColumn();
+$pendingDeposits = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE deposit_status = 'pending'")->fetchColumn();
 $completedSessions = (int)$pdo->query("SELECT COUNT(*) FROM session_logs")->fetchColumn();
-$totalSuppliesInStock = (int)$pdo->query("SELECT SUM(total_stock) FROM sterile_supplies")->fetchColumn() ?: 0;
+$totalCatalogDesigns = (int)$pdo->query("SELECT COUNT(*) FROM tattoo_catalog WHERE status = 'available'")->fetchColumn();
 
-// 2. Clinical Safety Alert Counters
-$lowStockCount = (int)$pdo->query("SELECT COUNT(*) FROM sterile_supplies WHERE total_stock <= reorder_threshold")->fetchColumn();
-$expiryCount = (int)$pdo->query("SELECT COUNT(*) FROM supply_batches_fifo WHERE qty_remaining > 0 AND expiration_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
-$totalAlertsCount = $lowStockCount + $expiryCount;
-
-// 3. Recent Studio Bookings & Consultation Activity
+// 2. Recent Studio Bookings & Consultation Activity
 $recentBookings = $pdo->query("
-    SELECT a.*, u.full_name AS client_name, art.full_name AS artist_name, s.service_name 
+    SELECT a.*, u.full_name AS client_name, art.full_name AS artist_name, 
+           COALESCE(cat.title, s.service_name, 'Tattoo Appointment') AS service_name,
+           COALESCE(a.body_region, 'Forearm') AS body_region,
+           a.placement_notes,
+           cat.title AS catalog_title,
+           cat.image_path AS catalog_image,
+           m.mockup_image_path
     FROM appointments a 
     JOIN users u ON a.client_id = u.id 
     JOIN users art ON a.artist_id = art.id 
-    JOIN service_pricing_matrix s ON a.service_id = s.id 
+    LEFT JOIN service_pricing_matrix s ON a.service_id = s.id 
+    LEFT JOIN tattoo_catalog cat ON a.catalog_id = cat.id
+    LEFT JOIN visualizer_mockups m ON a.mockup_id = m.id
     ORDER BY a.id DESC LIMIT 10
 ")->fetchAll();
 
-// 4. Studio Visual Analytics & Chart Datasets
+// 3. Studio Visual Analytics & Chart Datasets
 // Past 6 Months Activity & Revenue Timeline
 $monthsMap = [];
 for ($i = 5; $i >= 0; $i--) {
@@ -64,7 +68,7 @@ $chartTrendBookings = array_column(array_values($monthsMap), 'bookings');
 $chartTrendCompleted = array_column(array_values($monthsMap), 'completed');
 $chartTrendRevenue = array_column(array_values($monthsMap), 'revenue');
 
-// 5. Booking Status Distribution
+// 4. Booking Status Distribution
 $chartStatusCounts = ['pending' => 0, 'confirmed' => 0, 'completed' => 0, 'cancelled' => 0];
 $stmtStatus = $pdo->query("SELECT booking_status, COUNT(*) as cnt FROM appointments GROUP BY booking_status");
 while ($r = $stmtStatus->fetch(PDO::FETCH_ASSOC)) {
@@ -74,7 +78,7 @@ while ($r = $stmtStatus->fetch(PDO::FETCH_ASSOC)) {
     }
 }
 
-// 6. Service Demand Breakdown
+// 5. Service Demand Breakdown
 $serviceStats = $pdo->query("
     SELECT s.service_name, COUNT(a.id) as booking_count 
     FROM service_pricing_matrix s
@@ -88,18 +92,17 @@ $chartServiceLabels = array_map(function($s) {
 }, $serviceStats);
 $chartServiceBookings = array_column($serviceStats, 'booking_count');
 
-// 7. FIFO Sterile Inventory Stock vs Threshold
-$inventoryStats = $pdo->query("
-    SELECT supply_name, total_stock, reorder_threshold 
-    FROM sterile_supplies 
-    ORDER BY id ASC
+// 6. Tattoo Catalog Breakdown by Category
+$catalogStats = $pdo->query("
+    SELECT category, COUNT(*) as design_count, AVG(price) as avg_price
+    FROM tattoo_catalog 
+    GROUP BY category
+    ORDER BY design_count DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$chartInventoryLabels = array_map(function($i) {
-    return strlen($i['supply_name']) > 20 ? substr($i['supply_name'], 0, 18) . '...' : $i['supply_name'];
-}, $inventoryStats);
-$chartInventoryStock = array_column($inventoryStats, 'total_stock');
-$chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
+$chartCatalogLabels = array_column($catalogStats, 'category');
+$chartCatalogCounts = array_column($catalogStats, 'design_count');
+$chartCatalogAvgPrice = array_map(fn($r) => round((float)$r['avg_price'], 2), $catalogStats);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -121,7 +124,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>body { font-family: 'Outfit', sans-serif; }</style>
 </head>
 <body class="bg-slate-50 text-slate-800 dark:bg-zinc-950 dark:text-zinc-100 min-h-screen flex flex-col justify-between transition-colors duration-200">
@@ -134,14 +137,14 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
             <!-- PAGE TITLE & BREADCRUMB -->
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                    <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">Studio Overview & Activity</h1>
-                    <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1">High-level KPIs, reservation queues, and clinical safety status.</p>
+                    <h1 class="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">Studio Overview & Activity</h1>
+                    <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1">High-level KPIs, reservation queues, and Shopee-style catalog status.</p>
                 </div>
                 <div class="flex items-center space-x-2">
-                    <span class="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80 px-3 py-1 rounded-full font-semibold flex items-center space-x-1.5 shadow-sm">
-                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span>Clinical System Operational</span>
-                    </span>
+                    <a href="index.php" target="_blank" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs uppercase tracking-wider transition-colors inline-flex items-center space-x-1 shadow-sm">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        <span>Live Shopee Store</span>
+                    </a>
                 </div>
             </div>
 
@@ -159,18 +162,18 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                 </div>
             <?php endif; ?>
 
-            <!-- ACTIVE SAFETY ALERTS BANNER -->
-            <?php if ($totalAlertsCount > 0): ?>
+            <!-- PENDING DEPOSITS ALERT BANNER -->
+            <?php if ($pendingDeposits > 0): ?>
                 <div class="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                     <div class="flex items-center space-x-3">
                         <svg class="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                         <div>
-                            <strong class="text-sm font-bold text-amber-900 dark:text-amber-200 block">Attention Required: <?= $totalAlertsCount ?> Clinical Inventory Safety Notice(s)</strong>
-                            <span class="text-xs text-amber-700 dark:text-amber-400"><?= $lowStockCount ?> item(s) below reorder threshold • <?= $expiryCount ?> batch lot(s) nearing or past expiration.</span>
+                            <strong class="text-sm font-bold text-amber-900 dark:text-amber-200 block">Action Needed: <?= $pendingDeposits ?> Client Reservation(s) Awaiting Deposit Audit</strong>
+                            <span class="text-xs text-amber-700 dark:text-amber-400">Clients have uploaded GCash receipts for studio flash and custom bookings. Inspect transactions to lock in chair schedules.</span>
                         </div>
                     </div>
-                    <a href="admin_inventory.php" class="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 dark:hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center space-x-1 flex-shrink-0">
-                        <span>Review Inventory</span>
+                    <a href="artist_portal.php" class="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 dark:hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center space-x-1 flex-shrink-0">
+                        <span>Review Deposits</span>
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                     </a>
                 </div>
@@ -180,23 +183,23 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
                 <div class="bg-white dark:bg-zinc-900/70 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
                     <span class="text-[11px] sm:text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Total Reservations</span>
-                    <span class="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400"><?= $totalBookings ?></span>
+                    <span class="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400"><?= $totalBookings ?></span>
                     <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">All-time booking requests</span>
                 </div>
                 <div class="bg-white dark:bg-zinc-900/70 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
                     <span class="text-[11px] sm:text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Verified Deposits</span>
-                    <span class="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400"><?= $verifiedDeposits ?></span>
+                    <span class="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400"><?= $verifiedDeposits ?></span>
                     <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">Audited GCash / bank receipts</span>
                 </div>
                 <div class="bg-white dark:bg-zinc-900/70 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
                     <span class="text-[11px] sm:text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Completed Sessions</span>
-                    <span class="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400"><?= $completedSessions ?></span>
-                    <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">Logged with supply deductions</span>
+                    <span class="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400"><?= $completedSessions ?></span>
+                    <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">Delivered tattoo procedures</span>
                 </div>
                 <div class="bg-white dark:bg-zinc-900/70 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
-                    <span class="text-[11px] sm:text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Total Sterile Units</span>
-                    <span class="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400"><?= $totalSuppliesInStock ?></span>
-                    <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">Needles, pigments, barriers</span>
+                    <span class="text-[11px] sm:text-xs uppercase font-semibold text-slate-500 dark:text-zinc-400 block mb-1">Active Flash Designs</span>
+                    <span class="text-2xl sm:text-3xl font-black text-purple-600 dark:text-purple-400"><?= $totalCatalogDesigns ?></span>
+                    <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-zinc-500 block mt-1">Live on Shopee Storefront</span>
                 </div>
             </div>
 
@@ -210,13 +213,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                             </span>
                             <span>Studio Visual Analytics & Operational Trends</span>
                         </h2>
-                        <p class="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">Live clinical telemetry, revenue trajectory, service demand, and inventory compliance.</p>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <span class="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 bg-white dark:bg-zinc-900 px-3 py-1 rounded-full border border-slate-200 dark:border-zinc-800 shadow-sm flex items-center space-x-1.5">
-                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                            <span>Live Telemetry</span>
-                        </span>
+                        <p class="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">Live reservation volume, revenue trajectory, style demand, and flash catalog distribution.</p>
                     </div>
                 </div>
 
@@ -251,88 +248,74 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
 
                     <!-- 2. BOOKING STATUS DISTRIBUTION (4 cols) -->
                     <div class="lg:col-span-4 bg-white dark:bg-zinc-900/70 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors flex flex-col justify-between">
-                        <div>
-                            <div class="flex items-center justify-between mb-1">
-                                <h3 class="text-sm font-bold text-slate-900 dark:text-white">Reservation Status</h3>
-                                <span class="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">Distribution</span>
-                            </div>
-                            <p class="text-[11px] text-slate-400 dark:text-zinc-500 mb-3">Pipeline breakdown across current booking requests</p>
-                            <div class="relative h-48 w-full flex items-center justify-center">
-                                <canvas id="chartStatusDist"></canvas>
-                            </div>
+                        <div class="mb-2">
+                            <h3 class="text-sm font-bold text-slate-900 dark:text-white">Reservation Status Split</h3>
+                            <p class="text-[11px] text-slate-400 dark:text-zinc-500">Distribution across all booked chair sessions</p>
                         </div>
-                        <!-- Mini status legend pills -->
-                        <div class="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800/80 text-[11px]">
-                            <div class="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/40">
-                                <span class="flex items-center space-x-1.5 text-slate-600 dark:text-zinc-400">
-                                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-                                    <span>Pending</span>
-                                </span>
-                                <span class="font-bold text-slate-900 dark:text-white"><?= $chartStatusCounts['pending'] ?></span>
+                        <div class="relative h-52 flex items-center justify-center">
+                            <canvas id="chartStatusDist"></canvas>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-[11px] pt-3 border-t border-slate-100 dark:border-zinc-800">
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                                <span class="text-slate-600 dark:text-zinc-400">Pending: <?= $chartStatusCounts['pending'] ?></span>
                             </div>
-                            <div class="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/40">
-                                <span class="flex items-center space-x-1.5 text-slate-600 dark:text-zinc-400">
-                                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                    <span>Confirmed</span>
-                                </span>
-                                <span class="font-bold text-slate-900 dark:text-white"><?= $chartStatusCounts['confirmed'] ?></span>
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                <span class="text-slate-600 dark:text-zinc-400">Confirmed: <?= $chartStatusCounts['confirmed'] ?></span>
                             </div>
-                            <div class="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/40">
-                                <span class="flex items-center space-x-1.5 text-slate-600 dark:text-zinc-400">
-                                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                                    <span>Completed</span>
-                                </span>
-                                <span class="font-bold text-slate-900 dark:text-white"><?= $chartStatusCounts['completed'] ?></span>
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                                <span class="text-slate-600 dark:text-zinc-400">Completed: <?= $chartStatusCounts['completed'] ?></span>
                             </div>
-                            <div class="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/40">
-                                <span class="flex items-center space-x-1.5 text-slate-600 dark:text-zinc-400">
-                                    <span class="w-2 h-2 rounded-full bg-rose-500"></span>
-                                    <span>Cancelled</span>
-                                </span>
-                                <span class="font-bold text-slate-900 dark:text-white"><?= $chartStatusCounts['cancelled'] ?></span>
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                                <span class="text-slate-600 dark:text-zinc-400">Cancelled: <?= $chartStatusCounts['cancelled'] ?></span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- BOTTOM ROW: SERVICE DEMAND + FIFO INVENTORY LEVELS -->
+                <!-- BOTTOM ROW: SERVICE DEMAND + TATTOO CATALOG BREAKDOWN -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <!-- 3. SERVICE POPULARITY & DEMAND -->
                     <div class="bg-white dark:bg-zinc-900/70 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-sm font-bold text-slate-900 dark:text-white">Service & Style Demand</h3>
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md">Catalog</span>
+                            <h3 class="text-sm font-bold text-slate-900 dark:text-white">Service Matrix Demand</h3>
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md">Baseline Tiers</span>
                         </div>
-                        <p class="text-[11px] text-slate-400 dark:text-zinc-500 mb-4">Total client reservation requests categorized by catalog service tier</p>
+                        <p class="text-[11px] text-slate-400 dark:text-zinc-500 mb-4">Total client bookings categorized by studio service matrix tier</p>
                         <div class="relative h-60 w-full">
                             <canvas id="chartServiceDemand"></canvas>
                         </div>
                     </div>
 
-                    <!-- 4. STERILE INVENTORY SAFETY VS REORDER THRESHOLD -->
+                    <!-- 4. TATTOO FLASH CATALOG BREAKDOWN (REPLACES REMOVED STERILE INVENTORY) -->
                     <div class="bg-white dark:bg-zinc-900/70 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-colors">
                         <div class="flex items-center justify-between mb-1">
-                            <h3 class="text-sm font-bold text-slate-900 dark:text-white">FIFO Sterile Inventory vs Safety Threshold</h3>
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">Clinical Safety</span>
+                            <h3 class="text-sm font-bold text-slate-900 dark:text-white">Shopee Catalog Flash Breakdown</h3>
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">Live Storefront</span>
                         </div>
-                        <p class="text-[11px] text-slate-400 dark:text-zinc-500 mb-4">Real-time stock on hand compared against minimum reorder points</p>
+                        <p class="text-[11px] text-slate-400 dark:text-zinc-500 mb-4">Available tattoo pieces and average pricing per stylistic category</p>
                         <div class="relative h-60 w-full">
-                            <canvas id="chartInventorySafety"></canvas>
+                            <canvas id="chartCatalogBreakdown"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- QUICK SHORTCUTS ROW -->
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                <a href="admin_inventory.php" class="bg-white dark:bg-zinc-900/70 hover:bg-slate-50 dark:hover:bg-zinc-800/50 p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-all group flex flex-col justify-between space-y-3">
+                <a href="admin_catalog.php" class="bg-white dark:bg-zinc-900/70 hover:bg-slate-50 dark:hover:bg-zinc-800/50 p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm transition-all group flex flex-col justify-between space-y-3">
                     <div class="flex items-center justify-between">
                         <div class="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
                         </div>
                         <svg class="w-4 h-4 text-slate-300 dark:text-zinc-600 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                     </div>
                     <div>
-                        <strong class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">FIFO Inventory</strong>
-                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Track lots & intake new supply</span>
+                        <strong class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">Tattoo Catalog</strong>
+                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Manage Shopee store & prices</span>
                     </div>
                 </a>
 
@@ -345,7 +328,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                     </div>
                     <div>
                         <strong class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">Audit Reports</strong>
-                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Export 5 categories to PDF/CSV</span>
+                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Export PDF/CSV archives</span>
                     </div>
                 </a>
 
@@ -371,7 +354,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                     </div>
                     <div>
                         <strong class="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">Users & RBAC</strong>
-                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Manage client & staff roles</span>
+                        <span class="text-[11px] text-slate-500 dark:text-zinc-400">Manage client & staff accounts</span>
                     </div>
                 </a>
             </div>
@@ -381,7 +364,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                     <div>
                         <h2 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white">Recent Studio Reservations</h2>
-                        <p class="text-xs text-slate-500 dark:text-zinc-400">Latest client appointment requests and deposit verification states.</p>
+                        <p class="text-xs text-slate-500 dark:text-zinc-400">Latest client appointment requests, availed flash pieces, and deposit verification states.</p>
                     </div>
                     <a href="admin_reports.php" class="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline inline-flex items-center space-x-1">
                         <span>Export Full Report</span>
@@ -399,7 +382,8 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                                     <th class="py-3 px-3">Ref #</th>
                                     <th class="py-3 px-3">Client</th>
                                     <th class="py-3 px-3">Artist</th>
-                                    <th class="py-3 px-3">Service & Region</th>
+                                    <th class="py-3 px-3">Availed Piece / Service</th>
+                                    <th class="py-3 px-3">2D Mockup</th>
                                     <th class="py-3 px-3">Date & Time</th>
                                     <th class="py-3 px-3">Deposit</th>
                                     <th class="py-3 px-3">Deposit Status</th>
@@ -413,8 +397,29 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                                         <td class="py-3 px-3 font-medium text-slate-900 dark:text-zinc-200"><?= htmlspecialchars($b['client_name']) ?></td>
                                         <td class="py-3 px-3 text-slate-600 dark:text-zinc-400"><?= htmlspecialchars($b['artist_name']) ?></td>
                                         <td class="py-3 px-3">
-                                            <span class="text-slate-800 dark:text-zinc-300 font-medium"><?= htmlspecialchars($b['service_name']) ?></span>
-                                            <span class="text-amber-600 dark:text-amber-400 uppercase text-[10px] block font-bold"><?= $b['body_region'] ?? 'Body' ?></span>
+                                            <span class="text-slate-800 dark:text-zinc-200 font-bold block"><?= htmlspecialchars($b['service_name']) ?></span>
+                                            <span class="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center space-x-1 mt-0.5">
+                                                <svg class="w-3 h-3 text-amber-500 inline-block flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                                <span><?= htmlspecialchars($b['body_region'] ?? 'Forearm') ?><?= !empty($b['placement_notes']) ? ' (' . htmlspecialchars($b['placement_notes']) . ')' : '' ?></span>
+                                            </span>
+                                            <?php if (!empty($b['catalog_title'])): ?>
+                                                <span class="text-[9px] text-slate-400 dark:text-zinc-500 font-semibold uppercase">Flash Store Item</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="py-3 px-3">
+                                            <?php if (!empty($b['mockup_image_path'])): ?>
+                                                <button type="button" onclick="openAdminMockupModal('../<?= htmlspecialchars($b['mockup_image_path']) ?>', '<?= htmlspecialchars($b['service_name']) ?>', '<?= htmlspecialchars($b['client_name']) ?>')" class="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center space-x-1 font-bold">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                                    <span>View Mockup</span>
+                                                </button>
+                                            <?php elseif (!empty($b['catalog_image'])): ?>
+                                                <a href="../<?= htmlspecialchars($b['catalog_image']) ?>" target="_blank" class="text-xs text-slate-500 hover:text-amber-500 font-medium flex items-center space-x-1">
+                                                    <img src="../<?= htmlspecialchars($b['catalog_image']) ?>" class="w-5 h-5 rounded object-cover">
+                                                    <span>Artwork</span>
+                                                </a>
+                                            <?php else: ?>
+                                                <span class="text-slate-400 dark:text-zinc-600 text-[11px]">—</span>
+                                            <?php endif; ?>
                                         </td>
                                         <td class="py-3 px-3 text-slate-600 dark:text-zinc-400"><?= $b['appointment_date'] ?> @ <?= $b['appointment_time'] ?></td>
                                         <td class="py-3 px-3 font-semibold text-slate-900 dark:text-zinc-200">₱<?= number_format($b['deposit_amount'], 2) ?></td>
@@ -445,7 +450,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
 
     <!-- FOOTER -->
     <footer class="py-6 px-4 sm:px-8 border-t border-slate-200 dark:border-zinc-900 bg-white dark:bg-transparent text-center text-xs text-slate-500 dark:text-zinc-600 transition-colors mt-8">
-        &copy; <?= date('Y') ?> Aengelos Tattoo Studio. ISO/IEC 25010 Evaluated Architecture. All Rights Reserved.
+        &copy; <?= date('Y') ?> Aengelos Tattoo Studio. Shopee E-Commerce & Studio Operations.
     </footer>
 
     <!-- CHARTS INITIALIZATION SCRIPT -->
@@ -660,30 +665,34 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
             });
         }
 
-        // 4. Chart: Sterile Supply Safety vs Reorder Threshold (Grouped Bar)
-        const ctxInventory = document.getElementById('chartInventorySafety');
-        let chartInventory = null;
-        if (ctxInventory) {
-            chartInventory = new Chart(ctxInventory, {
+        // 4. Chart: Tattoo Flash Catalog Breakdown by Category
+        const ctxCatalog = document.getElementById('chartCatalogBreakdown');
+        let chartCatalog = null;
+        if (ctxCatalog) {
+            chartCatalog = new Chart(ctxCatalog, {
                 type: 'bar',
                 data: {
-                    labels: <?= json_encode($chartInventoryLabels) ?>,
+                    labels: <?= json_encode($chartCatalogLabels) ?>,
                     datasets: [
                         {
-                            label: 'Current In-Stock',
-                            data: <?= json_encode($chartInventoryStock) ?>,
-                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
-                            borderColor: '#10b981',
+                            type: 'bar',
+                            label: 'Available Pieces',
+                            data: <?= json_encode($chartCatalogCounts) ?>,
+                            backgroundColor: 'rgba(245, 158, 11, 0.75)',
+                            borderColor: '#f59e0b',
                             borderWidth: 1.5,
-                            borderRadius: 6
+                            borderRadius: 6,
+                            yAxisID: 'yCount'
                         },
                         {
-                            label: 'Reorder Safety Point',
-                            data: <?= json_encode($chartInventoryThreshold) ?>,
-                            backgroundColor: 'rgba(239, 68, 68, 0.4)',
-                            borderColor: '#ef4444',
-                            borderWidth: 1.5,
-                            borderRadius: 6
+                            type: 'line',
+                            label: 'Avg Price (₱)',
+                            data: <?= json_encode($chartCatalogAvgPrice) ?>,
+                            borderColor: '#10b981',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointBackgroundColor: '#10b981',
+                            yAxisID: 'yPrice'
                         }
                     ]
                 },
@@ -708,13 +717,26 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                     },
                     scales: {
                         x: {
-                            ticks: { color: theme.text, font: { size: 11 } },
+                            ticks: { color: theme.text, font: { size: 10 } },
                             grid: { color: theme.grid }
                         },
-                        y: {
+                        yCount: {
+                            type: 'linear',
+                            position: 'left',
                             beginAtZero: true,
-                            ticks: { color: theme.text, font: { size: 11 } },
+                            ticks: { stepSize: 1, precision: 0, color: theme.text, font: { size: 11 } },
                             grid: { color: theme.grid }
+                        },
+                        yPrice: {
+                            type: 'linear',
+                            position: 'right',
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: false },
+                            ticks: {
+                                color: theme.text,
+                                font: { size: 10 },
+                                callback: function(v) { return '₱' + v; }
+                            }
                         }
                     }
                 }
@@ -724,7 +746,7 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
         // Dynamic Theme Mutation Observer
         const observer = new MutationObserver(function() {
             const t = getTheme();
-            [chartTrend, chartService, chartInventory].forEach(chart => {
+            [chartTrend, chartService, chartCatalog].forEach(chart => {
                 if (!chart) return;
                 if (chart.options.scales.x) {
                     chart.options.scales.x.grid.color = t.grid;
@@ -737,6 +759,9 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
                 if (chart.options.scales.yCount) {
                     chart.options.scales.yCount.grid.color = t.grid;
                     chart.options.scales.yCount.ticks.color = t.text;
+                }
+                if (chart.options.scales.yPrice) {
+                    chart.options.scales.yPrice.ticks.color = t.text;
                 }
                 if (chart.options.scales.yRev) {
                     chart.options.scales.yRev.ticks.color = t.text;
@@ -753,6 +778,37 @@ $chartInventoryThreshold = array_column($inventoryStats, 'reorder_threshold');
         });
         observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     });
+
+    // 2D Placement Mockup Inspection Modal
+    function openAdminMockupModal(src, title, client) {
+        document.getElementById('adminMockupImg').src = src;
+        document.getElementById('adminMockupTitle').textContent = title + ' (' + client + ')';
+        document.getElementById('adminMockupDownload').href = src;
+        document.getElementById('adminMockupModal').classList.remove('hidden');
+    }
+    function closeAdminMockupModal() {
+        document.getElementById('adminMockupModal').classList.add('hidden');
+    }
     </script>
+
+    <!-- ADMIN 2D MOCKUP MODAL -->
+    <div id="adminMockupModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-sm text-slate-900 dark:text-white">2D Placement Mockup</h3>
+                    <p id="adminMockupTitle" class="text-xs text-amber-600 dark:text-amber-400 font-medium"></p>
+                </div>
+                <button type="button" onclick="closeAdminMockupModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-lg font-bold p-1">&times;</button>
+            </div>
+            <div class="flex justify-center rounded-xl bg-slate-100 dark:bg-zinc-950 p-2 border border-slate-200 dark:border-zinc-800">
+                <img id="adminMockupImg" src="" alt="Placement Mockup" class="max-h-[60vh] max-w-full object-contain rounded-lg">
+            </div>
+            <div class="flex space-x-2">
+                <a id="adminMockupDownload" href="" download="tattoo_placement_mockup.png" class="flex-1 py-2 text-center bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-bold transition-colors">Download Mockup</a>
+                <button type="button" onclick="closeAdminMockupModal()" class="flex-1 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold transition-colors">Close</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
